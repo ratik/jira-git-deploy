@@ -17,7 +17,7 @@ const jira = new JiraAPI({
     apiVersion: process.env.JIRA_API_VERSION!
 });
 
-const getTasks = async (stateId: string)  => {
+const getTasks = async (stateId: string[])  => {
     const project = await jira.listSprints(process.env.JIRA_PROJECT_ID);
     const sprints = project.sprints.filter((v: any) => v.state === 'ACTIVE');
     if (sprints.length) {
@@ -28,7 +28,7 @@ const getTasks = async (stateId: string)  => {
 	    const tasks = await jira.getSprintIssues(process.env.JIRA_PROJECT_ID, sprint.id);
 	    console.log(tasks.contents.completedIssues);
 	    for(const task of tasks.contents.issuesNotCompletedInCurrentSprint.concat(tasks.contents.completedIssues)) {
-		if (task.status.id === stateId) {
+		if (stateId.includes(task.status.id)) {
 		    console.log(`adding task ${task.key}`)
 		    data.push(task.key);
 		}
@@ -108,7 +108,7 @@ const router = new Router();
 
 router.get('/release/:name', async (ctx) => {
     const stateId: string = process.env.JIRA_STATE_ID || '';
-    const tasks = await getTasks(stateId);
+    const tasks = await getTasks(stateId.split(' '));
     const containers = await getContainers();
     let temp = '';
     for(const one of containers) {
@@ -134,7 +134,9 @@ router.get('/release/:name', async (ctx) => {
 	    }
 	}
 	if (restart) {
-	    temp += await execCommandInContainer(one.container, "sh restart.sh", true);
+	    if (process.env.RESTART_ON_SUCCESS === 'true') {
+		temp += await execCommandInContainer(one.container, "sh restart.sh", true);
+	    }
 	} else {
 	    temp += await execCommandInContainer(one.container, "git diff --name-status --diff-filter=U");
 	    temp += await execCommandInContainer(one.container, "git --no-pager diff --diff-filter=U");
