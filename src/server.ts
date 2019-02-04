@@ -2,43 +2,13 @@ import * as Koa from 'koa';
 import * as Router from 'koa-router';
 import * as bodyParser from 'koa-bodyparser';
 import * as _ from 'lodash';
-const JiraAPI = require('jira-client');
+import * as fs from 'fs';
+import * as views from 'koa-views-templates';
 import { Docker } from 'node-docker-api';
 const aha = require('aha');
 
 const docker = new Docker({ socketPath: '/var/run/docker.sock' });
 
-const jira = new JiraAPI({
-    protocol: process.env.JIRA_PROTOCOL!,
-    host: process.env.JIRA_HOST!,
-    port: process.env.JIRA_PORT!,
-    username: process.env.JIRA_USERNAME!,
-    password: process.env.JIRA_PASSWORD!,
-    apiVersion: process.env.JIRA_API_VERSION!
-});
-
-const getTasks = async (stateId: string[])  => {
-    const project = await jira.listSprints(process.env.JIRA_PROJECT_ID);
-    const sprints = project.sprints.filter((v: any) => v.state === 'ACTIVE');
-    if (sprints.length) {
-	console.log(`${sprints.length} active sprints`);
-	let data: string[] = [];
-	for(const sprint of sprints) {
-	    console.log(`Doing sprint ${sprint.id}`);
-	    const tasks = await jira.getSprintIssues(process.env.JIRA_PROJECT_ID, sprint.id);
-	    console.log(tasks.contents.completedIssues);
-	    for(const task of tasks.contents.issuesNotCompletedInCurrentSprint.concat(tasks.contents.completedIssues)) {
-		if (stateId.includes(task.status.id)) {
-		    console.log(`adding task ${task.key}`)
-		    data.push(task.key);
-		}
-	    }
-	}
-        return { ok: true, tasks: data.reverse() }
-    } else {
-	return { ok: false, tasks:[], error: 'no active sprints' };
-    }
-};
 interface ContainerData {
 	State: string,
 	Names: string[]
@@ -49,6 +19,11 @@ interface ContainerBranches {
 	branches: string[],
 	container: Object
 };
+interface requestAnswer {
+    way: string,
+    action: string,
+    tasks: string
+}
 
 const promisifyStream = (stream, pretty) => new Promise((resolve, reject) => {
   let data = '';
@@ -94,6 +69,8 @@ const getContainers = async () => {
 
 const app = new Koa();
 
+app.use(views(`${__dirname}/../templates/`, { map: {html: 'lodash' }}));
+
 app.use(bodyParser({
   onerror: function (err, ctx) {
     ctx.throw('body parse error', 422);
@@ -106,23 +83,22 @@ app.use(async (ctx, next) => {
 
 const router = new Router();
 
-router.get('/release/:name', async (ctx) => {
-    const stateId: string = process.env.JIRA_STATE_ID || '';
-    const tasks = await getTasks(stateId.split(' '));
+const deploy = async (containerName, tasks) => {
     const containers = await getContainers();
     let temp = '';
     for(const one of containers) {
-	if (one.container.data.Names[0] !== `/webtycoon-${ctx.params.name}`) {
+	if (one.container.data.Names[0] !== `/webtycoon-${containerName}`) {
 	    continue;
 	}
+	console.log(`deploy start /webtycoon-${containerName}`);
 	let restart = true;
 	temp += await execCommandInContainer(one.container, "git reset --merge");
 	temp += await execCommandInContainer(one.container, "git checkout master");
 	temp += await execCommandInContainer(one.container, "git pull origin");
 	temp += await execCommandInContainer(one.container, "git branch -D tempRC");
 	temp += await execCommandInContainer(one.container, "git checkout -b tempRC");
-	if (tasks.tasks.length) {
-	    for(const task of tasks.tasks) {
+	if (tasks.length) {
+	    for(const task of tasks) {
 		const branch = one.branches.find(v => v.match(new RegExp(task.replace('-','-*'),'gi')));
 		if (branch){
 		    const x= await execCommandInContainer(one.container, `git merge ${branch}`);
@@ -142,18 +118,29 @@ router.get('/release/:name', async (ctx) => {
 	    temp += await execCommandInContainer(one.container, "git --no-pager diff --diff-filter=U");
 	}
     }
-    ctx.body = `<pre>${temp}</pre>`;
+    return `<pre>${temp}</pre>`;
+};
+
+router.get('/main/:name', async(ctx) => {
+  const file = `${ctx.params.name}.data`;
+  if (!fs.existsSync(file)) {
+    fs.writeFileSync(file,'');
+  }
+  const data = fs.readFileSync(file);
+  await ctx.render('main.html', { data: data ? data : '', name: ctx.params.name });
 });
 
-/*router.post('/*', async (ctx) => {
-    ctx.body = 'ok';
-    console.log(ctx.request);
-    console.log(ctx.request.body);
-});
-/**/
-router.post('/jira', async (ctx) => {
-    ctx.body = 'ok';
-    console.log(ctx.request.body);
+router.post('/main/save', async(ctx) => {
+    const { tasks, way, action } = <requestAnswer>ctx.request.body;
+    const file = `${way}.data`;
+    if (action === 'Restart') {
+	const tasks = fs.readFileSync(file).toString().split("\n").map(v=>v.trim()).filter(v => v);
+	console.log(`restart ${way} with tasks [${tasks.join(',')}]`);
+	ctx.body = await deploy(way, tasks);
+    } else {
+	fs.writeFileSync(file,tasks);
+	ctx.redirect(`/main/${way}`);
+    }
 });
 
 

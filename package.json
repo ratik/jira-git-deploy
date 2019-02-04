@@ -22,6 +22,7 @@
     "koa": "^2.6.2",
     "koa-bodyparser": "^4.2.1",
     "koa-router": "^7.4.0",
+    "koa-views-templates": "^1.0.1",
     "lodash": "^4.17.11",
     "node-docker-api": "^1.1.22",
     "request": "^2.88.0"

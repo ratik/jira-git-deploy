@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Deploy</title>
+    <style>
+    * {font: normal 11px Tahoma;}
+    textarea, input {border: 2px solid #888;}
+    textarea {width: 30em; height: 10em}
+    </style>
+  </head>
+  <body>
+<pre>
+	<form method="POST" action="save">
+	<textarea name="tasks"><%-data%></textarea>
+	<input type="submit" value="Save" />
+	<input type="hidden" value="<%-name%>" name="way" />
+	<input type="submit" value="Restart" name="action" />
+	</form>
+</pre>
+  </body>
+</html>
